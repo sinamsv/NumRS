@@ -1,18 +1,16 @@
 use std::ops::Mul;
 use crate::matrix::Matrix;
 
-impl Mul for Matrix {
+impl Mul for &Matrix {
     type Output = Matrix;
 
-    fn mul(self, rhs: Self) -> Self::Output {
+    fn mul(self, rhs: &Matrix) -> Matrix {
         assert_eq!(
             self.cols, rhs.rows,
             "Cannot multiply: left cols ({}) != right rows ({})",
             self.cols, rhs.rows
         );
-
         let mut data = vec![0.0; self.rows * rhs.cols];
-
         for i in 0..self.rows {
             for j in 0..rhs.cols {
                 for k in 0..self.cols {
@@ -21,7 +19,21 @@ impl Mul for Matrix {
                 }
             }
         }
-
         Matrix::new(self.rows, rhs.cols, data)
     }
+}
+
+impl Mul for Matrix {
+    type Output = Matrix;
+    fn mul(self, rhs: Matrix) -> Matrix { &self * &rhs }
+}
+
+impl Mul<&Matrix> for Matrix {
+    type Output = Matrix;
+    fn mul(self, rhs: &Matrix) -> Matrix { &self * rhs }
+}
+
+impl Mul<Matrix> for &Matrix {
+    type Output = Matrix;
+    fn mul(self, rhs: Matrix) -> Matrix { self * &rhs }
 }
