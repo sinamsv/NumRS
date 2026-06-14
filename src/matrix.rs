@@ -10,7 +10,32 @@ pub struct Matrix {
 
 impl Matrix {
     pub fn new(rows: usize, cols: usize, data: Vec<f64>) -> Self {
+        assert_eq!(
+            rows * cols, data.len(),
+            "Data length ({}) does not match dimensions ({}×{})",
+            data.len(), rows, cols
+        );
         Matrix { rows, cols, data }
+    }
+
+    pub fn fill(rows: usize, cols: usize, value: f64) -> Self {
+        Matrix::new(rows, cols, vec![value; rows * cols])
+    }
+
+    pub fn zeros(rows: usize, cols: usize) -> Self {
+        Matrix::fill(rows, cols, 0.0)
+    }
+
+    pub fn ones(rows: usize, cols: usize) -> Self {
+        Matrix::fill(rows, cols, 1.0)
+    }
+
+    pub fn eye(n: usize) -> Self {
+        let mut m = Matrix::zeros(n, n);
+        for i in 0..n {
+            m.data[i * n + i] = 1.0;
+        }
+        m
     }
 }
 
