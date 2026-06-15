@@ -19,35 +19,12 @@ with an intuitive macro syntax, colored terminal output, and clean modular desig
 
 ## Quick Start
 
-```toml
-# Cargo.toml
-[dependencies]
-colored = "2"
+```bash
+git clone https://github.com/sinamsv/NumRS.git
 ```
 
-```rust
-mod matrix;
-mod math;
-mod ops;
-
-use matrix::Matrix;
-
-fn main() {
-    let a = ns_array![
-        [1, 2, 3],
-        [4, 5, 6]
-    ];
-
-    let b = ns_array![
-        [1, 0],
-        [0, 1],
-        [1, 0]
-    ];
-
-    println!("{}", a);
-    println!("{}", a.transpose());
-    println!("{}", &a * &b);
-}
+```bash
+cargo run
 ```
 
 ---
