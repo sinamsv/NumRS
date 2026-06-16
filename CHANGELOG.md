@@ -5,6 +5,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.0] — Parallel Execution
+
+### Added
+- `src/parallel.rs` — `PAR_THRESHOLD` constant (1024 elements) and `should_parallelize(n)`
+  helper; single place to tune the serial/parallel cutoff for the whole library
+- `rayon = "1.10"` dependency — work-stealing thread pool, zero unsafe code
+
+### Changed — automatic parallelism (no API changes)
+All operations below silently switch to `rayon` when the matrix has ≥ 1024 elements;
+smaller matrices keep the serial path to avoid thread-spawn overhead.
+
+| Operation | Parallel strategy |
+|---|---|
+| `+` / `try_add` | `par_iter().zip().map()` |
+| `-` / `try_sub` | `par_iter().zip().map()` |
+| `*` / `try_mul` | `into_par_iter()` over output rows |
+| `scalar *` | `par_iter().map()` |
+| `transpose()` | `into_par_iter()` over output columns |
+| `hadamard()` | `par_iter().zip().map()` |
+| `norm()` | `par_iter().map().sum()` |
+| `det()` | unchanged — Gaussian elimination is sequential by nature |
+| `inverse()` | unchanged — Gauss-Jordan is sequential by nature |
+
+### Design Notes
+- **Zero API changes** — existing code compiles and runs unchanged; speedup is automatic
+- **Threshold = 1024** (≈ 32×32): below this, serial is faster due to thread-spawn overhead
+- `PAR_THRESHOLD` lives in `parallel.rs` — one constant to tune if needed
+
+---
+
 ## [0.6.1] — Error Handling
 
 ### Added

@@ -1,12 +1,18 @@
 use std::ops::Mul;
+use rayon::prelude::*;
 use crate::matrix::Matrix;
+use crate::parallel::should_parallelize;
 
 // &Matrix * f64
 impl Mul<f64> for &Matrix {
     type Output = Matrix;
     fn mul(self, scalar: f64) -> Matrix {
-        let data = self.data.iter().map(|&x| x * scalar).collect();
-        Matrix::new(self.rows, self.cols, data)
+        let data = if should_parallelize(self.data.len()) {
+            self.data.par_iter().map(|&x| x * scalar).collect()
+        } else {
+            self.data.iter().map(|&x| x * scalar).collect()
+        };
+        Matrix::new_unchecked(self.rows, self.cols, data)
     }
 }
 

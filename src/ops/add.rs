@@ -1,6 +1,8 @@
 use std::ops::Add;
+use rayon::prelude::*;
 use crate::matrix::Matrix;
 use crate::error::MatrixError;
+use crate::parallel::should_parallelize;
 
 // ── Internal shape-check helper ────────────────────────────────────────────
 fn check_same_shape(lhs: &Matrix, rhs: &Matrix) -> Result<(), MatrixError> {
@@ -17,12 +19,20 @@ fn check_same_shape(lhs: &Matrix, rhs: &Matrix) -> Result<(), MatrixError> {
 // ── Safe version ───────────────────────────────────────────────────────────
 impl Matrix {
     /// Add two matrices, returning `Err` on shape mismatch.
+    /// Automatically uses parallel execution for large matrices.
     pub fn try_add(&self, rhs: &Matrix) -> Result<Matrix, MatrixError> {
         check_same_shape(self, rhs)?;
-        let data = self.data.iter()
-            .zip(rhs.data.iter())
-            .map(|(a, b)| a + b)
-            .collect();
+        let data = if should_parallelize(self.data.len()) {
+            self.data.par_iter()
+                .zip(rhs.data.par_iter())
+                .map(|(a, b)| a + b)
+                .collect()
+        } else {
+            self.data.iter()
+                .zip(rhs.data.iter())
+                .map(|(a, b)| a + b)
+                .collect()
+        };
         Ok(Matrix::new_unchecked(self.rows, self.cols, data))
     }
 }
@@ -33,8 +43,8 @@ impl Add for &Matrix {
 
     fn add(self, rhs: &Matrix) -> Matrix {
         match check_same_shape(self, rhs) {
-            Ok(_)    => self.try_add(rhs).unwrap(),
-            Err(e)   => panic!("[NumRS] Add failed: {}", e),
+            Ok(_)  => self.try_add(rhs).unwrap(),
+            Err(e) => panic!("[NumRS] Add failed: {}", e),
         }
     }
 }

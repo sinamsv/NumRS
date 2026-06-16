@@ -1,71 +1,58 @@
-use numrs::{Matrix, MatrixError, ns_array};
+use numrs::{Matrix, ns_array};
+use std::time::Instant;
 
 fn main() {
-    println!("--- NumRS 0.6.1 🦀 — Error Handling Demo ---\n");
+    println!("--- NumRS 0.7.0 🦀 — Parallel Benchmark ---\n");
 
-    // ── Operators still work cleanly ───────────────────────────────────────
+    // ── Correctness check (small matrices) ────────────────────────────────
     let a = ns_array![[1, 2, 3], [4, 5, 6]];
     let b = Matrix::eye(3);
-    println!("A:\n{}", a);
     println!("A × eye(3):\n{}", &a * &b);
     println!("A transposed:\n{}", a.transpose());
 
-    // ── det() now returns Result ───────────────────────────────────────────
     let m = ns_array![[3, 1], [2, 4]];
-    match m.det() {
-        Ok(d)  => println!("det(M) = {:.3}\n", d),
-        Err(e) => println!("det error: {}\n", e),
+    println!("det(M) = {:.3}", m.det().unwrap());
+    println!("M⁻¹:\n{}", m.inverse().unwrap());
+
+    // ── Benchmark: matrix multiplication ──────────────────────────────────
+    let sizes = [64, 128, 256, 512];
+
+    println!("Matrix Multiplication Benchmark (A × B where A and B are N×N)\n");
+    println!("{:>6}  {:>12}  {:>12}  {:>8}",
+             "N", "serial (ms)", "parallel (ms)", "speedup");
+    println!("{}", "-".repeat(46));
+
+    for &n in &sizes {
+        // Build two random-ish matrices (deterministic, no rand dep needed)
+        let data_a: Vec<f64> = (0..n*n).map(|i| ((i * 7 + 3) % 97) as f64 / 10.0).collect();
+        let data_b: Vec<f64> = (0..n*n).map(|i| ((i * 13 + 5) % 89) as f64 / 10.0).collect();
+        let a = Matrix::new(n, n, data_a);
+        let b = Matrix::new(n, n, data_b);
+
+        // Serial: use the plain loop path (below threshold)
+        let t0 = Instant::now();
+        let mut serial_data = vec![0.0f64; n * n];
+        for i in 0..n {
+            for j in 0..n {
+                for k in 0..n {
+                    serial_data[i * n + j] +=
+                        a.data[i * n + k] * b.data[k * n + j];
+                }
+            }
+        }
+        let serial_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let _ = Matrix::new(n, n, serial_data); // ensure not optimized away
+
+        // Parallel: force the par path by calling try_mul
+        // (n*n >= 1024 for all sizes above)
+        let t1 = Instant::now();
+        let _par = a.try_mul(&b).unwrap();
+        let par_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+        let speedup = serial_ms / par_ms;
+        println!("{:>6}  {:>12.2}  {:>13.2}  {:>7.2}×",
+                 n, serial_ms, par_ms, speedup);
     }
 
-    // ── inverse() returns Result instead of Option ─────────────────────────
-    match m.inverse() {
-        Ok(inv) => println!("M⁻¹:\n{}", inv),
-        Err(e)  => println!("inverse error: {}\n", e),
-    }
-
-    // ── NonInvertible error ────────────────────────────────────────────────
-    let singular = ns_array![[1, 2], [2, 4]];
-    match singular.inverse() {
-        Ok(_)  => println!("Got inverse (unexpected)"),
-        Err(e) => println!("Singular matrix → Err: {}\n", e),
-    }
-
-    // ── NonSquare error ────────────────────────────────────────────────────
-    let rect = ns_array![[1, 2, 3], [4, 5, 6]];
-    match rect.det() {
-        Ok(d)  => println!("det = {}", d),
-        Err(e) => println!("Non-square → Err: {}\n", e),
-    }
-
-    // ── try_add — safe addition ────────────────────────────────────────────
-    let x = ns_array![[1, 2], [3, 4]];
-    let y = ns_array![[5, 6], [7, 8]];
-    match x.try_add(&y) {
-        Ok(sum) => println!("try_add:\n{}", sum),
-        Err(e)  => println!("try_add error: {}\n", e),
-    }
-
-    // ── try_add with mismatched shapes ────────────────────────────────────
-    let z = ns_array![[1, 2, 3]];
-    match x.try_add(&z) {
-        Ok(_)  => println!("Added (unexpected)"),
-        Err(e) => println!("Shape mismatch → Err: {}\n", e),
-    }
-
-    // ── try_mul — safe multiplication ─────────────────────────────────────
-    let p = ns_array![[1, 2], [3, 4]];
-    let q = ns_array![[1, 0], [0, 1]];
-    match p.try_mul(&q) {
-        Ok(prod) => println!("try_mul (P × I):\n{}", prod),
-        Err(e)   => println!("try_mul error: {}\n", e),
-    }
-
-    // ── Matching on error variant ──────────────────────────────────────────
-    let bad = ns_array![[1, 2, 3]];
-    if let Err(MatrixError::NonSquare { rows, cols }) = bad.det() {
-        println!("Caught NonSquare: {}×{} is not a square matrix\n", rows, cols);
-    }
-
-    println!("Done ✓");
+    println!("\nDone ✓");
 }
-
