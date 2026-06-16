@@ -5,6 +5,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.6.1] — Error Handling
+
+### Added
+- `src/error.rs` — new `MatrixError` enum implementing `std::error::Error` + `Display`
+  - `ShapeMismatch { expected, found }` — element-wise ops on incompatible shapes
+  - `DimensionMismatch { left_cols, right_rows }` — matrix multiplication dimension error
+  - `NonSquare { rows, cols }` — `det()` / `inverse()` called on a non-square matrix
+  - `NonInvertible` — `inverse()` failed because the matrix is singular
+  - `InvalidConstruction { rows, cols, data_length }` — `Matrix::new()` size mismatch
+  - `IndexOutOfBounds { index, dimensions }` — `[(i,j)]` access beyond bounds
+- `MatrixError` re-exported from `lib.rs` — `use numrs::MatrixError;`
+
+### Changed
+- **`det()`** — now returns `Result<f64, MatrixError>` instead of panicking on non-square input
+- **`inverse()`** — now returns `Result<Matrix, MatrixError>` replacing `Option<Matrix>`;
+  singular matrices produce `Err(MatrixError::NonInvertible)`
+- **`hadamard()`** — now returns `Result<Matrix, MatrixError>` instead of panicking
+- **Operators `+` `-` `*`** — panics replaced with clean `[NumRS] <MatrixError message>` format
+- **`Matrix::new()`** — panic message now uses `MatrixError::InvalidConstruction`
+- **`Index` / `IndexMut`** — panic message now uses `MatrixError::IndexOutOfBounds`
+
+### Added (safe variants)
+- `Matrix::try_add(&rhs)` → `Result<Matrix, MatrixError>`
+- `Matrix::try_sub(&rhs)` → `Result<Matrix, MatrixError>`
+- `Matrix::try_mul(&rhs)` → `Result<Matrix, MatrixError>`
+
+### Internal
+- `Matrix::new_unchecked(rows, cols, data)` — `pub(crate)` constructor that skips the
+  length assertion; used internally wherever the shape is already validated.
+  Includes a `debug_assert` to catch bugs in debug builds.
+
+### Design Notes
+- **Hybrid approach**: operators (`+`, `-`, `*`) still panic for ergonomic math syntax;
+  `try_*` variants provide `Result`-returning alternatives for safe contexts
+- All panics now route through `MatrixError::Display` — consistent, readable messages
+- `det()` returning `Ok(0.0)` for singular matrices is intentional:
+  a determinant of zero is a valid mathematical result, not an error
+
+---
+
 ## [0.6.0] — Mathematical Operations
 
 ### Added
