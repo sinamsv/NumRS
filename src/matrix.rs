@@ -1,5 +1,6 @@
 use std::fmt;
 use colored::Colorize;
+use crate::error::MatrixError;
 
 #[derive(Debug, Clone)]
 pub struct Matrix {
@@ -9,17 +10,30 @@ pub struct Matrix {
 }
 
 impl Matrix {
+    /// Public constructor — panics with a clean `MatrixError` message on bad input.
+    /// Internal code should prefer `new_unchecked` when shape is already validated.
     pub fn new(rows: usize, cols: usize, data: Vec<f64>) -> Self {
-        assert_eq!(
+        if rows * cols != data.len() {
+            panic!(
+                "[NumRS] {}",
+                MatrixError::InvalidConstruction { rows, cols, data_length: data.len() }
+            );
+        }
+        Matrix { rows, cols, data }
+    }
+
+    /// Infallible internal constructor — skips the length check.
+    /// Only call this when `rows * cols == data.len()` is already guaranteed.
+    pub(crate) fn new_unchecked(rows: usize, cols: usize, data: Vec<f64>) -> Self {
+        debug_assert_eq!(
             rows * cols, data.len(),
-            "Data length ({}) does not match dimensions ({}×{})",
-            data.len(), rows, cols
+            "new_unchecked called with mismatched dimensions — this is a NumRS bug"
         );
         Matrix { rows, cols, data }
     }
 
     pub fn fill(rows: usize, cols: usize, value: f64) -> Self {
-        Matrix::new(rows, cols, vec![value; rows * cols])
+        Matrix::new_unchecked(rows, cols, vec![value; rows * cols])
     }
 
     pub fn zeros(rows: usize, cols: usize) -> Self {
@@ -101,7 +115,7 @@ macro_rules! ns_array {
             )*
             let total = data.len();
             let cols = if rows > 0 { total / rows } else { 0 };
-            assert_eq!(rows * cols, total, "Error: rows are not the same size!");
+            assert_eq!(rows * cols, total, "[NumRS] ns_array!: rows are not the same length");
             $crate::matrix::Matrix::new(rows, cols, data)
         }
     };

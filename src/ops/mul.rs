@@ -1,15 +1,24 @@
 use std::ops::Mul;
 use crate::matrix::Matrix;
+use crate::error::MatrixError;
 
-impl Mul for &Matrix {
-    type Output = Matrix;
+// ── Internal dimension-check helper ───────────────────────────────────────
+fn check_mul_dims(lhs: &Matrix, rhs: &Matrix) -> Result<(), MatrixError> {
+    if lhs.cols == rhs.rows {
+        Ok(())
+    } else {
+        Err(MatrixError::DimensionMismatch {
+            left_cols:  lhs.cols,
+            right_rows: rhs.rows,
+        })
+    }
+}
 
-    fn mul(self, rhs: &Matrix) -> Matrix {
-        assert_eq!(
-            self.cols, rhs.rows,
-            "Cannot multiply: left cols ({}) != right rows ({})",
-            self.cols, rhs.rows
-        );
+// ── Safe version ───────────────────────────────────────────────────────────
+impl Matrix {
+    /// Multiply two matrices (dot product), returning `Err` on dimension mismatch.
+    pub fn try_mul(&self, rhs: &Matrix) -> Result<Matrix, MatrixError> {
+        check_mul_dims(self, rhs)?;
         let mut data = vec![0.0; self.rows * rhs.cols];
         for i in 0..self.rows {
             for j in 0..rhs.cols {
@@ -19,7 +28,19 @@ impl Mul for &Matrix {
                 }
             }
         }
-        Matrix::new(self.rows, rhs.cols, data)
+        Ok(Matrix::new_unchecked(self.rows, rhs.cols, data))
+    }
+}
+
+// ── Operator — panics with MatrixError message on bad input ────────────────
+impl Mul for &Matrix {
+    type Output = Matrix;
+
+    fn mul(self, rhs: &Matrix) -> Matrix {
+        match check_mul_dims(self, rhs) {
+            Ok(_)  => self.try_mul(rhs).unwrap(),
+            Err(e) => panic!("[NumRS] Mul failed: {}", e),
+        }
     }
 }
 
