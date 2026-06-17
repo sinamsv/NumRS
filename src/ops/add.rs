@@ -63,3 +63,81 @@ impl Add<Matrix> for &Matrix {
     type Output = Matrix;
     fn add(self, rhs: Matrix) -> Matrix { self + &rhs }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ns_array;
+    use crate::assert_close;
+
+    #[test]
+    fn add_produces_correct_values() {
+        let a = ns_array![[1, 2], [3, 4]];
+        let b = ns_array![[5, 6], [7, 8]];
+        let c = &a + &b;
+        assert_eq!(c.data, vec![6.0, 8.0, 10.0, 12.0]);
+        assert_eq!((c.rows, c.cols), (2, 2));
+    }
+
+    #[test]
+    fn add_works_for_all_four_ownership_combinations() {
+        let a = ns_array![[1, 2]];
+        let b = ns_array![[3, 4]];
+
+        let r1 = &a + &b;                 // &T + &T
+        let r2 = a.clone() + b.clone();    // T + T
+        let r3 = a.clone() + &b;           // T + &T
+        let r4 = &a + b.clone();           // &T + T
+
+        for r in [&r1, &r2, &r3, &r4] {
+            assert_eq!(r.data, vec![4.0, 6.0]);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "shape mismatch")]
+    fn add_panics_on_shape_mismatch() {
+        let a = ns_array![[1, 2], [3, 4]];   // 2×2
+        let b = ns_array![[1, 2, 3]];        // 1×3
+        let _ = &a + &b;
+    }
+
+    #[test]
+    fn try_add_returns_ok_on_matching_shapes() {
+        let a = ns_array![[1, 2], [3, 4]];
+        let b = ns_array![[1, 1], [1, 1]];
+        let result = a.try_add(&b);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().data, vec![2.0, 3.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn try_add_returns_shape_mismatch_error() {
+        let a = ns_array![[1, 2], [3, 4]];   // 2×2
+        let b = ns_array![[1, 2, 3]];        // 1×3
+
+        match a.try_add(&b) {
+            Err(MatrixError::ShapeMismatch { expected, found }) => {
+                assert_eq!(expected, (2, 2));
+                assert_eq!(found, (1, 3));
+            }
+            other => panic!("expected ShapeMismatch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn try_add_matches_serial_and_parallel_paths() {
+        // 40×40 = 1600 elements — above PAR_THRESHOLD (1024)
+        let n = 40;
+        let data: Vec<f64> = (0..n * n).map(|i| i as f64).collect();
+        let a = Matrix::new(n, n, data.clone());
+        let b = Matrix::new(n, n, data);
+
+        let result = a.try_add(&b).unwrap();
+        // Every element should be doubled — verifies the parallel path
+        // produces identical results to the simple doubling rule.
+        for (i, &v) in result.data.iter().enumerate() {
+            assert_close!(v, (i as f64) * 2.0);
+        }
+    }
+}
