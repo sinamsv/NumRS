@@ -1,0 +1,49 @@
+name: CI
+
+# Pinned rayon = "1.10.0" in Cargo.toml supports rustc 1.75+, so this
+# matrix checks that the *same* lockfile builds and passes tests on
+# both the oldest version we support and current stable.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: build & test (rustc ${{ matrix.rust }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: ["1.75.0", "stable"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install rustc ${{ matrix.rust }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Cache cargo registry & build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          # Cargo.lock is the right cache key here: rayon is pinned,
+          # so the lockfile only changes when a dependency genuinely changes.
+          key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.rust }}-
+
+      - name: Build (debug)
+        run: cargo build --verbose --locked
+
+      - name: Run tests (unit + integration)
+        run: cargo test --verbose --locked
+
+      - name: Build (release)
+        run: cargo build --release --verbose --locked
