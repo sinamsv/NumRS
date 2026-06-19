@@ -157,6 +157,10 @@ src/
 - [ ] ML layer: ReLU, softmax, sigmoid, gradient tracking
 
 ---
+## Documentation
+
+- [USAGE.md](USAGE.md)
+- [CHANGELOG.md](CHANGELOG.md)
 
 ## License
 
