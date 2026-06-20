@@ -4,7 +4,6 @@ use crate::matrix::Matrix;
 use crate::error::MatrixError;
 use crate::parallel::should_parallelize;
 
-// ── Internal shape-check helper ────────────────────────────────────────────
 fn check_same_shape(lhs: &Matrix, rhs: &Matrix) -> Result<(), MatrixError> {
     if lhs.rows == rhs.rows && lhs.cols == rhs.cols {
         Ok(())
@@ -16,10 +15,7 @@ fn check_same_shape(lhs: &Matrix, rhs: &Matrix) -> Result<(), MatrixError> {
     }
 }
 
-// ── Safe version ───────────────────────────────────────────────────────────
 impl Matrix {
-    /// Add two matrices, returning `Err` on shape mismatch.
-    /// Automatically uses parallel execution for large matrices.
     pub fn try_add(&self, rhs: &Matrix) -> Result<Matrix, MatrixError> {
         check_same_shape(self, rhs)?;
         let data = if should_parallelize(self.data.len()) {
@@ -37,7 +33,6 @@ impl Matrix {
     }
 }
 
-// ── Operator — panics with MatrixError message on bad input ────────────────
 impl Add for &Matrix {
     type Output = Matrix;
 
@@ -84,10 +79,10 @@ mod tests {
         let a = ns_array![[1, 2]];
         let b = ns_array![[3, 4]];
 
-        let r1 = &a + &b;                 // &T + &T
-        let r2 = a.clone() + b.clone();    // T + T
-        let r3 = a.clone() + &b;           // T + &T
-        let r4 = &a + b.clone();           // &T + T
+        let r1 = &a + &b;
+        let r2 = a.clone() + b.clone();
+        let r3 = a.clone() + &b;
+        let r4 = &a + b.clone();
 
         for r in [&r1, &r2, &r3, &r4] {
             assert_eq!(r.data, vec![4.0, 6.0]);
@@ -97,8 +92,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "shape mismatch")]
     fn add_panics_on_shape_mismatch() {
-        let a = ns_array![[1, 2], [3, 4]];   // 2×2
-        let b = ns_array![[1, 2, 3]];        // 1×3
+        let a = ns_array![[1, 2], [3, 4]];
+        let b = ns_array![[1, 2, 3]];
         let _ = &a + &b;
     }
 
@@ -113,8 +108,8 @@ mod tests {
 
     #[test]
     fn try_add_returns_shape_mismatch_error() {
-        let a = ns_array![[1, 2], [3, 4]];   // 2×2
-        let b = ns_array![[1, 2, 3]];        // 1×3
+        let a = ns_array![[1, 2], [3, 4]];
+        let b = ns_array![[1, 2, 3]];
 
         match a.try_add(&b) {
             Err(MatrixError::ShapeMismatch { expected, found }) => {
@@ -127,15 +122,12 @@ mod tests {
 
     #[test]
     fn try_add_matches_serial_and_parallel_paths() {
-        // 40×40 = 1600 elements — above PAR_THRESHOLD (1024)
         let n = 40;
         let data: Vec<f64> = (0..n * n).map(|i| i as f64).collect();
         let a = Matrix::new(n, n, data.clone());
         let b = Matrix::new(n, n, data);
 
         let result = a.try_add(&b).unwrap();
-        // Every element should be doubled — verifies the parallel path
-        // produces identical results to the simple doubling rule.
         for (i, &v) in result.data.iter().enumerate() {
             assert_close!(v, (i as f64) * 2.0);
         }

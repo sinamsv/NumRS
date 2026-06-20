@@ -2,6 +2,10 @@ use std::fmt;
 use std::ops::{Add, Sub, Mul, Index, IndexMut};
 use colored::Colorize;
 use num_traits::{Zero, One};
+use rand::{Rng, SeedableRng};
+use rand::rngs::StdRng;
+use rand::distributions::Standard;
+use rand_distr::{Distribution, StandardNormal};
 
 /// A generic, N-dimensional, row-major (C-order) flat-storage tensor.
 ///
@@ -83,6 +87,77 @@ impl<T: Clone + One> Tensor<T> {
         Tensor::fill(shape, T::one())
     }
 }
+
+// ── Random constructors (uniform) ────────────────────────────────────────
+//
+// Works for any `T` that `rand` knows how to sample directly out of thin
+// air via the `Standard` distribution — this covers every Rust numeric
+// primitive (f32, f64, all integer types), exactly like `Zero`/`One` do
+// for `zeros`/`ones`.
+impl<T> Tensor<T>
+where
+    Standard: Distribution<T>,
+{
+    /// Tensor with elements drawn from a uniform distribution.
+    /// For floats this is `[0, 1)`; for integers this is the full range of `T`.
+    /// Uses the thread-local RNG — not reproducible across runs.
+    /// For reproducible output, use `rand_seeded`.
+    pub fn rand(shape: &[usize]) -> Self {
+        let size: usize = shape.iter().product();
+        let mut rng = rand::thread_rng();
+        let data: Vec<T> = (0..size).map(|_| rng.gen::<T>()).collect();
+        Tensor::from_vec(shape, data)
+    }
+
+    /// Like `rand`, but deterministic: the same `seed` always produces
+    /// the same tensor, regardless of machine or run.
+    pub fn rand_seeded(shape: &[usize], seed: u64) -> Self {
+        let size: usize = shape.iter().product();
+        let mut rng = StdRng::seed_from_u64(seed);
+        let data: Vec<T> = (0..size).map(|_| rng.gen::<T>()).collect();
+        Tensor::from_vec(shape, data)
+    }
+}
+
+// ── Random constructors (normal) — f32/f64 only ──────────────────────────
+//
+// A standard normal distribution only makes mathematical sense for
+// floating-point types, so unlike `rand`/`zeros`/`ones`, `randn` is NOT
+// blanket-generic over `T`. It's implemented individually for `f32` and
+// `f64` rather than gated behind `num_traits::Float`, to keep the bound
+// simple and avoid pulling Float's full method set into scope here.
+macro_rules! impl_randn_for_float {
+    ($t:ty) => {
+        impl Tensor<$t> {
+            /// Tensor with elements drawn from a standard normal
+            /// distribution (mean 0, standard deviation 1).
+            /// Uses the thread-local RNG — not reproducible across runs.
+            /// For reproducible output, use `randn_seeded`.
+            pub fn randn(shape: &[usize]) -> Self {
+                let size: usize = shape.iter().product();
+                let mut rng = rand::thread_rng();
+                let data: Vec<$t> = (0..size)
+                    .map(|_| rng.sample::<$t, _>(StandardNormal))
+                    .collect();
+                Tensor::from_vec(shape, data)
+            }
+
+            /// Like `randn`, but deterministic: the same `seed` always
+            /// produces the same tensor, regardless of machine or run.
+            pub fn randn_seeded(shape: &[usize], seed: u64) -> Self {
+                let size: usize = shape.iter().product();
+                let mut rng = StdRng::seed_from_u64(seed);
+                let data: Vec<$t> = (0..size)
+                    .map(|_| StandardNormal.sample(&mut rng))
+                    .collect();
+                Tensor::from_vec(shape, data)
+            }
+        }
+    };
+}
+
+impl_randn_for_float!(f32);
+impl_randn_for_float!(f64);
 
 // ── Indexing: t[&[i, j, k, ...]] ────────────────────────────────────────
 impl<T> Index<&[usize]> for Tensor<T> {
@@ -188,5 +263,85 @@ fn colorize<T: fmt::Display + PartialOrd + Zero>(f: &mut fmt::Formatter<'_>, val
         write!(f, "{}", s.dimmed())
     } else {
         write!(f, "{}", s.white())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── rand (generic uniform) ──────────────────────────────────────────
+    #[test]
+    fn rand_produces_correct_shape_and_len() {
+        let t: Tensor<f64> = Tensor::rand(&[2, 3, 4]);
+        assert_eq!(t.shape(), &[2, 3, 4]);
+        assert_eq!(t.len(), 24);
+    }
+
+    #[test]
+    fn rand_float_values_are_within_unit_interval() {
+        let t: Tensor<f64> = Tensor::rand(&[5, 5]);
+        for &v in t.as_slice() {
+            assert!((0.0..1.0).contains(&v), "value {} out of [0,1)", v);
+        }
+    }
+
+    #[test]
+    fn rand_works_for_integer_types_too() {
+        // Just needs to construct successfully with the right length —
+        // integer "uniform" spans the full range of the type, so there's
+        // no [0,1) bound to check here.
+        let t: Tensor<i64> = Tensor::rand(&[3, 3]);
+        assert_eq!(t.len(), 9);
+    }
+
+    // ── randn (float-only normal) ───────────────────────────────────────
+    #[test]
+    fn randn_produces_correct_shape_f64() {
+        let t: Tensor<f64> = <Tensor<f64>>::randn(&[2, 2, 2]);
+        assert_eq!(t.shape(), &[2, 2, 2]);
+        assert_eq!(t.len(), 8);
+    }
+
+    #[test]
+    fn randn_produces_correct_shape_f32() {
+        let t: Tensor<f32> = <Tensor<f32>>::randn(&[4]);
+        assert_eq!(t.len(), 4);
+    }
+
+    #[test]
+    fn randn_is_not_trivially_constant() {
+        let t: Tensor<f64> = <Tensor<f64>>::randn(&[10, 10]);
+        let first = t.as_slice()[0];
+        assert!(t.as_slice().iter().any(|&v| v != first));
+    }
+
+    // ── seeded reproducibility ────────────────────────────────────────
+    #[test]
+    fn rand_seeded_is_deterministic() {
+        let a: Tensor<f64> = Tensor::rand_seeded(&[3, 3], 42);
+        let b: Tensor<f64> = Tensor::rand_seeded(&[3, 3], 42);
+        assert_eq!(a.as_slice(), b.as_slice());
+    }
+
+    #[test]
+    fn rand_seeded_differs_across_seeds() {
+        let a: Tensor<f64> = Tensor::rand_seeded(&[3, 3], 1);
+        let b: Tensor<f64> = Tensor::rand_seeded(&[3, 3], 2);
+        assert_ne!(a.as_slice(), b.as_slice());
+    }
+
+    #[test]
+    fn randn_seeded_is_deterministic() {
+        let a: Tensor<f64> = <Tensor<f64>>::randn_seeded(&[3, 3], 7);
+        let b: Tensor<f64> = <Tensor<f64>>::randn_seeded(&[3, 3], 7);
+        assert_eq!(a.as_slice(), b.as_slice());
+    }
+
+    #[test]
+    fn randn_seeded_differs_across_seeds() {
+        let a: Tensor<f64> = <Tensor<f64>>::randn_seeded(&[3, 3], 1);
+        let b: Tensor<f64> = <Tensor<f64>>::randn_seeded(&[3, 3], 2);
+        assert_ne!(a.as_slice(), b.as_slice());
     }
 }

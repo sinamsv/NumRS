@@ -4,7 +4,6 @@ use crate::matrix::Matrix;
 use crate::error::MatrixError;
 use crate::parallel::should_parallelize;
 
-// ── Internal shape-check helper ────────────────────────────────────────────
 fn check_same_shape(lhs: &Matrix, rhs: &Matrix) -> Result<(), MatrixError> {
     if lhs.rows == rhs.rows && lhs.cols == rhs.cols {
         Ok(())
@@ -16,10 +15,7 @@ fn check_same_shape(lhs: &Matrix, rhs: &Matrix) -> Result<(), MatrixError> {
     }
 }
 
-// ── Safe version ───────────────────────────────────────────────────────────
 impl Matrix {
-    /// Subtract two matrices, returning `Err` on shape mismatch.
-    /// Automatically uses parallel execution for large matrices.
     pub fn try_sub(&self, rhs: &Matrix) -> Result<Matrix, MatrixError> {
         check_same_shape(self, rhs)?;
         let data = if should_parallelize(self.data.len()) {
@@ -37,7 +33,6 @@ impl Matrix {
     }
 }
 
-// ── Operator — panics with MatrixError message on bad input ────────────────
 impl Sub for &Matrix {
     type Output = Matrix;
 

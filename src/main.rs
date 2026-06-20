@@ -2,9 +2,8 @@ use numrs::{Matrix, ns_array};
 use std::time::Instant;
 
 fn main() {
-    println!("--- NumRS 0.7.0 🦀 — Parallel Benchmark ---\n");
+    println!("--- NumRS 0.8.0 🦀 — Parallel Benchmark ---\n");
 
-    // ── Correctness check (small matrices) ────────────────────────────────
     let a = ns_array![[1, 2, 3], [4, 5, 6]];
     let b = Matrix::eye(3);
     println!("A × eye(3):\n{}", &a * &b);
@@ -14,8 +13,10 @@ fn main() {
     println!("det(M) = {:.3}", m.det().unwrap());
     println!("M⁻¹:\n{}", m.inverse().unwrap());
 
-    // ── Benchmark: matrix multiplication ──────────────────────────────────
-    let sizes = [64, 128, 256, 512];
+    println!("Random matrix:\n{}", Matrix::rand_seeded(3, 3, 42));
+    println!("Random normal matrix:\n{}", Matrix::randn_seeded(3, 3, 42));
+
+    let sizes = [64, 128];
 
     println!("Matrix Multiplication Benchmark (A × B where A and B are N×N)\n");
     println!("{:>6}  {:>12}  {:>12}  {:>8}",
@@ -23,13 +24,11 @@ fn main() {
     println!("{}", "-".repeat(46));
 
     for &n in &sizes {
-        // Build two random-ish matrices (deterministic, no rand dep needed)
         let data_a: Vec<f64> = (0..n*n).map(|i| ((i * 7 + 3) % 97) as f64 / 10.0).collect();
         let data_b: Vec<f64> = (0..n*n).map(|i| ((i * 13 + 5) % 89) as f64 / 10.0).collect();
         let a = Matrix::new(n, n, data_a);
         let b = Matrix::new(n, n, data_b);
 
-        // Serial: use the plain loop path (below threshold)
         let t0 = Instant::now();
         let mut serial_data = vec![0.0f64; n * n];
         for i in 0..n {
@@ -41,10 +40,8 @@ fn main() {
             }
         }
         let serial_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let _ = Matrix::new(n, n, serial_data); // ensure not optimized away
+        let _ = Matrix::new(n, n, serial_data);
 
-        // Parallel: force the par path by calling try_mul
-        // (n*n >= 1024 for all sizes above)
         let t1 = Instant::now();
         let _par = a.try_mul(&b).unwrap();
         let par_ms = t1.elapsed().as_secs_f64() * 1000.0;
