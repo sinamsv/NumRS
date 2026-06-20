@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.0] — Tensors & Randomness
+
+### Added
+- `src/tensor.rs` — New N-dimensional generic `Tensor<T>` implementation
+  - Row-major flat storage with stride-based indexing
+  - Generic over any type `T` (f32, f64, i32, etc.)
+  - Support for `+`, `-`, scalar `*`, and `.hadamard()`
+  - Recursive `Display` implementation for any rank
+- **Randomness Support** (for both `Matrix` and `Tensor`)
+  - `.rand()` / `.rand_seeded()` — Uniform distribution
+  - `.randn()` / `.randn_seeded()` — Standard normal distribution (floats only)
+  - Deterministic seeded constructors for reproducible benchmarks and tests
+- `rand` and `rand_distr` dependencies
+
+### Changed
+- `Matrix::det` and `Matrix::inverse` updated with better internal pivot selection
+- Internal `new_unchecked` constructor for `Matrix` to avoid redundant checks in internal math routines
+
+---
+
 ## [0.7.0] — Parallel Execution
 
 ### Added
