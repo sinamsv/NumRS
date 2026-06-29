@@ -6,6 +6,7 @@ use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use rand::distributions::Standard;
 use rand_distr::{Distribution, StandardNormal};
+use crate::error::TensorError;
 
 /// A generic, N-dimensional, row-major (C-order) flat-storage tensor.
 ///
@@ -34,15 +35,51 @@ fn compute_strides(shape: &[usize]) -> Vec<usize> {
     strides
 }
 
+fn check_same_shape(lhs: &[usize], rhs: &[usize]) -> Result<(), TensorError> {
+    if lhs == rhs {
+        Ok(())
+    } else {
+        Err(TensorError::ShapeMismatch {
+            expected: lhs.to_vec(),
+            found:    rhs.to_vec(),
+        })
+    }
+}
+
 impl<T> Tensor<T> {
-    /// Build a tensor from an explicit shape and flat row-major data.
-    /// Panics if `data.len()` doesn't match the product of `shape`.
-    pub fn from_vec(shape: &[usize], data: Vec<T>) -> Self {
+    /// Fallible constructor — build a tensor from an explicit shape and
+    /// flat row-major data. Returns `Err(TensorError::InvalidConstruction)`
+    /// if `data.len()` doesn't match the product of `shape`.
+    pub fn try_from_vec(shape: &[usize], data: Vec<T>) -> Result<Self, TensorError> {
         let expected: usize = shape.iter().product();
-        assert_eq!(
-            expected, data.len(),
-            "Data length ({}) does not match shape {:?} (expected {})",
-            data.len(), shape, expected
+        if expected != data.len() {
+            return Err(TensorError::InvalidConstruction {
+                shape:        shape.to_vec(),
+                expected_len: expected,
+                found_len:    data.len(),
+            });
+        }
+        Ok(Tensor { shape: shape.to_vec(), strides: compute_strides(shape), data })
+    }
+
+    /// Build a tensor from an explicit shape and flat row-major data.
+    /// Panics with a `TensorError::InvalidConstruction` message if
+    /// `data.len()` doesn't match the product of `shape`.
+    /// For a non-panicking alternative, use `try_from_vec`.
+    pub fn from_vec(shape: &[usize], data: Vec<T>) -> Self {
+        match Tensor::try_from_vec(shape, data) {
+            Ok(t)  => t,
+            Err(e) => panic!("[NumRS] {}", e),
+        }
+    }
+
+    /// Infallible internal constructor — skips the length check.
+    /// Only call this when `shape.iter().product() == data.len()` is
+    /// already guaranteed.
+    pub(crate) fn from_vec_unchecked(shape: &[usize], data: Vec<T>) -> Self {
+        debug_assert_eq!(
+            shape.iter().product::<usize>(), data.len(),
+            "from_vec_unchecked called with mismatched shape — this is a NumRS bug"
         );
         Tensor { shape: shape.to_vec(), strides: compute_strides(shape), data }
     }
@@ -54,17 +91,36 @@ impl<T> Tensor<T> {
     pub fn is_empty(&self) -> bool { self.data.is_empty() }
     pub fn as_slice(&self) -> &[T] { &self.data }
 
-    fn flat_index(&self, idx: &[usize]) -> usize {
-        assert_eq!(
-            idx.len(), self.shape.len(),
-            "Index rank {} does not match tensor rank {}", idx.len(), self.shape.len()
-        );
-        idx.iter().zip(&self.strides).zip(&self.shape)
-            .map(|((&i, &s), &dim)| {
-                assert!(i < dim, "Index out of bounds: {:?} on shape {:?}", idx, self.shape);
-                i * s
-            })
-            .sum()
+    /// Fallible flat-index resolution — checks rank and per-axis bounds
+    /// before computing the offset into `data`.
+    fn try_flat_index(&self, idx: &[usize]) -> Result<usize, TensorError> {
+        if idx.len() != self.shape.len() {
+            return Err(TensorError::RankMismatch {
+                expected_rank: self.shape.len(),
+                found_rank:    idx.len(),
+            });
+        }
+        for (&i, &dim) in idx.iter().zip(&self.shape) {
+            if i >= dim {
+                return Err(TensorError::IndexOutOfBounds {
+                    index: idx.to_vec(),
+                    shape: self.shape.clone(),
+                });
+            }
+        }
+        Ok(idx.iter().zip(&self.strides).map(|(&i, &s)| i * s).sum())
+    }
+
+    /// Fallible element access — `Result` counterpart to `Index`/`IndexMut`.
+    pub fn try_get(&self, idx: &[usize]) -> Result<&T, TensorError> {
+        let flat = self.try_flat_index(idx)?;
+        Ok(&self.data[flat])
+    }
+
+    /// Fallible mutable element access — `Result` counterpart to `IndexMut`.
+    pub fn try_get_mut(&mut self, idx: &[usize]) -> Result<&mut T, TensorError> {
+        let flat = self.try_flat_index(idx)?;
+        Ok(&mut self.data[flat])
     }
 }
 
@@ -72,7 +128,7 @@ impl<T: Clone> Tensor<T> {
     /// Fill a tensor of the given shape with a single repeated value.
     pub fn fill(shape: &[usize], value: T) -> Self {
         let size: usize = shape.iter().product();
-        Tensor::from_vec(shape, vec![value; size])
+        Tensor::from_vec_unchecked(shape, vec![value; size])
     }
 }
 
@@ -106,7 +162,7 @@ where
         let size: usize = shape.iter().product();
         let mut rng = rand::thread_rng();
         let data: Vec<T> = (0..size).map(|_| rng.gen::<T>()).collect();
-        Tensor::from_vec(shape, data)
+        Tensor::from_vec_unchecked(shape, data)
     }
 
     /// Like `rand`, but deterministic: the same `seed` always produces
@@ -115,7 +171,7 @@ where
         let size: usize = shape.iter().product();
         let mut rng = StdRng::seed_from_u64(seed);
         let data: Vec<T> = (0..size).map(|_| rng.gen::<T>()).collect();
-        Tensor::from_vec(shape, data)
+        Tensor::from_vec_unchecked(shape, data)
     }
 }
 
@@ -139,7 +195,7 @@ macro_rules! impl_randn_for_float {
                 let data: Vec<$t> = (0..size)
                     .map(|_| rng.sample::<$t, _>(StandardNormal))
                     .collect();
-                Tensor::from_vec(shape, data)
+                Tensor::from_vec_unchecked(shape, data)
             }
 
             /// Like `randn`, but deterministic: the same `seed` always
@@ -150,7 +206,7 @@ macro_rules! impl_randn_for_float {
                 let data: Vec<$t> = (0..size)
                     .map(|_| StandardNormal.sample(&mut rng))
                     .collect();
-                Tensor::from_vec(shape, data)
+                Tensor::from_vec_unchecked(shape, data)
             }
         }
     };
@@ -160,27 +216,59 @@ impl_randn_for_float!(f32);
 impl_randn_for_float!(f64);
 
 // ── Indexing: t[&[i, j, k, ...]] ────────────────────────────────────────
+//
+// `Index`/`IndexMut` can't return `Result` (the trait signature requires
+// `&Output`/`&mut Output`), so they route through `try_get`/`try_get_mut`
+// and unwrap — panicking with the same clean `TensorError::Display`
+// message that `Matrix`'s `Index` impl produces via `MatrixError`.
+// Prefer `try_get`/`try_get_mut` directly in contexts where you want a
+// `Result` instead of a panic.
 impl<T> Index<&[usize]> for Tensor<T> {
     type Output = T;
     fn index(&self, idx: &[usize]) -> &T {
-        &self.data[self.flat_index(idx)]
+        match self.try_get(idx) {
+            Ok(v)  => v,
+            Err(e) => panic!("[NumRS] {}", e),
+        }
     }
 }
 
 impl<T> IndexMut<&[usize]> for Tensor<T> {
     fn index_mut(&mut self, idx: &[usize]) -> &mut T {
-        let flat = self.flat_index(idx);
-        &mut self.data[flat]
+        match self.try_flat_index(idx) {
+            Ok(flat) => &mut self.data[flat],
+            Err(e)   => panic!("[NumRS] {}", e),
+        }
     }
 }
 
 // ── Element-wise Add / Sub (shape must match exactly) ───────────────────
+//
+// Safe variants, returning `Result` — the `Add`/`Sub` operator impls below
+// delegate to these and unwrap, mirroring `Matrix::try_add` / `try_sub`.
+impl<T: Copy + Add<Output = T>> Tensor<T> {
+    pub fn try_add(&self, rhs: &Tensor<T>) -> Result<Tensor<T>, TensorError> {
+        check_same_shape(&self.shape, &rhs.shape)?;
+        let data = self.data.iter().zip(rhs.data.iter()).map(|(&a, &b)| a + b).collect();
+        Ok(Tensor::from_vec_unchecked(&self.shape, data))
+    }
+}
+
+impl<T: Copy + Sub<Output = T>> Tensor<T> {
+    pub fn try_sub(&self, rhs: &Tensor<T>) -> Result<Tensor<T>, TensorError> {
+        check_same_shape(&self.shape, &rhs.shape)?;
+        let data = self.data.iter().zip(rhs.data.iter()).map(|(&a, &b)| a - b).collect();
+        Ok(Tensor::from_vec_unchecked(&self.shape, data))
+    }
+}
+
 impl<T: Copy + Add<Output = T>> Add for &Tensor<T> {
     type Output = Tensor<T>;
     fn add(self, rhs: &Tensor<T>) -> Tensor<T> {
-        assert_eq!(self.shape, rhs.shape, "Cannot add: shape {:?} != {:?}", self.shape, rhs.shape);
-        let data = self.data.iter().zip(rhs.data.iter()).map(|(&a, &b)| a + b).collect();
-        Tensor::from_vec(&self.shape, data)
+        match self.try_add(rhs) {
+            Ok(t)  => t,
+            Err(e) => panic!("[NumRS] Add failed: {}", e),
+        }
     }
 }
 impl<T: Copy + Add<Output = T>> Add for Tensor<T> { type Output = Tensor<T>; fn add(self, rhs: Tensor<T>) -> Tensor<T> { &self + &rhs } }
@@ -190,9 +278,10 @@ impl<T: Copy + Add<Output = T>> Add<Tensor<T>> for &Tensor<T> { type Output = Te
 impl<T: Copy + Sub<Output = T>> Sub for &Tensor<T> {
     type Output = Tensor<T>;
     fn sub(self, rhs: &Tensor<T>) -> Tensor<T> {
-        assert_eq!(self.shape, rhs.shape, "Cannot subtract: shape {:?} != {:?}", self.shape, rhs.shape);
-        let data = self.data.iter().zip(rhs.data.iter()).map(|(&a, &b)| a - b).collect();
-        Tensor::from_vec(&self.shape, data)
+        match self.try_sub(rhs) {
+            Ok(t)  => t,
+            Err(e) => panic!("[NumRS] Sub failed: {}", e),
+        }
     }
 }
 impl<T: Copy + Sub<Output = T>> Sub for Tensor<T> { type Output = Tensor<T>; fn sub(self, rhs: Tensor<T>) -> Tensor<T> { &self - &rhs } }
@@ -200,21 +289,35 @@ impl<T: Copy + Sub<Output = T>> Sub<&Tensor<T>> for Tensor<T> { type Output = Te
 impl<T: Copy + Sub<Output = T>> Sub<Tensor<T>> for &Tensor<T> { type Output = Tensor<T>; fn sub(self, rhs: Tensor<T>) -> Tensor<T> { self - &rhs } }
 
 // ── Scalar multiplication: &tensor * scalar ─────────────────────────────
+//
+// Scalar multiplication can never fail on shape grounds (every element is
+// just multiplied independently), so there's no `try_mul_scalar` — nothing
+// here can panic on a value this library controls.
 impl<T: Copy + Mul<Output = T>> Mul<T> for &Tensor<T> {
     type Output = Tensor<T>;
     fn mul(self, scalar: T) -> Tensor<T> {
         let data = self.data.iter().map(|&x| x * scalar).collect();
-        Tensor::from_vec(&self.shape, data)
+        Tensor::from_vec_unchecked(&self.shape, data)
     }
 }
 impl<T: Copy + Mul<Output = T>> Mul<T> for Tensor<T> { type Output = Tensor<T>; fn mul(self, scalar: T) -> Tensor<T> { &self * scalar } }
 
 impl<T: Copy + Mul<Output = T>> Tensor<T> {
-    /// Element-wise (Hadamard) product — shapes must match exactly.
-    pub fn hadamard(&self, rhs: &Tensor<T>) -> Tensor<T> {
-        assert_eq!(self.shape, rhs.shape, "Hadamard requires equal shapes: {:?} != {:?}", self.shape, rhs.shape);
+    /// Element-wise (Hadamard) product — fallible; shapes must match exactly.
+    pub fn try_hadamard(&self, rhs: &Tensor<T>) -> Result<Tensor<T>, TensorError> {
+        check_same_shape(&self.shape, &rhs.shape)?;
         let data = self.data.iter().zip(rhs.data.iter()).map(|(&a, &b)| a * b).collect();
-        Tensor::from_vec(&self.shape, data)
+        Ok(Tensor::from_vec_unchecked(&self.shape, data))
+    }
+
+    /// Element-wise (Hadamard) product — panics with a clean
+    /// `TensorError::Display` message on shape mismatch.
+    /// For a non-panicking alternative, use `try_hadamard`.
+    pub fn hadamard(&self, rhs: &Tensor<T>) -> Tensor<T> {
+        match self.try_hadamard(rhs) {
+            Ok(t)  => t,
+            Err(e) => panic!("[NumRS] Hadamard failed: {}", e),
+        }
     }
 }
 
@@ -269,6 +372,7 @@ fn colorize<T: fmt::Display + PartialOrd + Zero>(f: &mut fmt::Formatter<'_>, val
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::TensorError;
 
     // ── rand (generic uniform) ──────────────────────────────────────────
     #[test]
@@ -343,5 +447,139 @@ mod tests {
         let a: Tensor<f64> = <Tensor<f64>>::randn_seeded(&[3, 3], 1);
         let b: Tensor<f64> = <Tensor<f64>>::randn_seeded(&[3, 3], 2);
         assert_ne!(a.as_slice(), b.as_slice());
+    }
+
+    // ── try_from_vec / from_vec error handling ──────────────────────────
+    #[test]
+    fn try_from_vec_returns_ok_on_matching_length() {
+        let t = Tensor::try_from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        assert!(t.is_ok());
+    }
+
+    #[test]
+    fn try_from_vec_returns_invalid_construction_error() {
+        match Tensor::try_from_vec(&[2, 2], vec![1, 2, 3]) {
+            Err(TensorError::InvalidConstruction { shape, expected_len, found_len }) => {
+                assert_eq!(shape, vec![2, 2]);
+                assert_eq!(expected_len, 4);
+                assert_eq!(found_len, 3);
+            }
+            other => panic!("expected InvalidConstruction, got {:?}", other),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid construction")]
+    fn from_vec_panics_on_mismatched_length() {
+        let _: Tensor<i32> = Tensor::from_vec(&[2, 2], vec![1, 2, 3]);
+    }
+
+    // ── try_get / try_get_mut / Index error handling ────────────────────
+    #[test]
+    fn try_get_reads_correct_value() {
+        let t = Tensor::from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        assert_eq!(*t.try_get(&[0, 1]).unwrap(), 2);
+        assert_eq!(*t.try_get(&[1, 0]).unwrap(), 3);
+    }
+
+    #[test]
+    fn try_get_returns_rank_mismatch_error() {
+        let t = Tensor::from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        match t.try_get(&[0]) {
+            Err(TensorError::RankMismatch { expected_rank, found_rank }) => {
+                assert_eq!(expected_rank, 2);
+                assert_eq!(found_rank, 1);
+            }
+            other => panic!("expected RankMismatch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn try_get_returns_index_out_of_bounds_error() {
+        let t = Tensor::from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        match t.try_get(&[5, 0]) {
+            Err(TensorError::IndexOutOfBounds { index, shape }) => {
+                assert_eq!(index, vec![5, 0]);
+                assert_eq!(shape, vec![2, 2]);
+            }
+            other => panic!("expected IndexOutOfBounds, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn try_get_mut_writes_correct_value() {
+        let mut t = Tensor::from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        *t.try_get_mut(&[0, 1]).unwrap() = 99;
+        assert_eq!(*t.try_get(&[0, 1]).unwrap(), 99);
+        // Neighboring elements must stay untouched
+        assert_eq!(*t.try_get(&[0, 0]).unwrap(), 1);
+        assert_eq!(*t.try_get(&[1, 1]).unwrap(), 4);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn index_panics_on_out_of_bounds() {
+        let t = Tensor::from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        let _ = t[&[2, 0][..]];
+    }
+
+    #[test]
+    #[should_panic(expected = "rank mismatch")]
+    fn index_panics_on_rank_mismatch() {
+        let t = Tensor::from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        let _ = t[&[0][..]];
+    }
+
+    // ── try_add / try_sub / try_hadamard error handling ─────────────────
+    #[test]
+    fn try_add_returns_shape_mismatch_error() {
+        let a = Tensor::from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        let b = Tensor::from_vec(&[4], vec![1, 2, 3, 4]);
+        match a.try_add(&b) {
+            Err(TensorError::ShapeMismatch { expected, found }) => {
+                assert_eq!(expected, vec![2, 2]);
+                assert_eq!(found, vec![4]);
+            }
+            other => panic!("expected ShapeMismatch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "shape mismatch")]
+    fn add_operator_panics_on_shape_mismatch() {
+        let a = Tensor::from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        let b = Tensor::from_vec(&[4], vec![1, 2, 3, 4]);
+        let _ = &a + &b;
+    }
+
+    #[test]
+    fn try_sub_returns_shape_mismatch_error() {
+        let a = Tensor::from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        let b = Tensor::from_vec(&[1, 4], vec![1, 2, 3, 4]);
+        assert!(matches!(a.try_sub(&b), Err(TensorError::ShapeMismatch { .. })));
+    }
+
+    #[test]
+    fn try_hadamard_returns_shape_mismatch_error() {
+        let a = Tensor::from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        let b = Tensor::from_vec(&[1, 4], vec![1, 2, 3, 4]);
+        assert!(matches!(a.try_hadamard(&b), Err(TensorError::ShapeMismatch { .. })));
+    }
+
+    #[test]
+    #[should_panic(expected = "Hadamard failed")]
+    fn hadamard_panics_on_shape_mismatch() {
+        let a = Tensor::from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        let b = Tensor::from_vec(&[1, 4], vec![1, 2, 3, 4]);
+        let _ = a.hadamard(&b);
+    }
+
+    #[test]
+    fn try_add_matches_existing_add_operator() {
+        let a = Tensor::from_vec(&[2, 2], vec![1, 2, 3, 4]);
+        let b = Tensor::from_vec(&[2, 2], vec![5, 6, 7, 8]);
+        let via_try = a.try_add(&b).unwrap();
+        let via_op = &a + &b;
+        assert_eq!(via_try.as_slice(), via_op.as_slice());
     }
 }

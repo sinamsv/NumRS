@@ -9,6 +9,5 @@ pub mod tensor;
 pub mod test_utils;
 
 pub use matrix::Matrix;
-pub use error::MatrixError;
+pub use error::{MatrixError, TensorError};
 pub use tensor::Tensor;
-

@@ -107,8 +107,6 @@ fn ns_array_macro_produces_matching_matrix_new() {
     assert_eq!((via_macro.rows, via_macro.cols), (via_new.rows, via_new.cols));
 }
 
-// ── New: rand/randn integration tests ───────────────────────────────────
-
 #[test]
 fn matrix_rand_seeded_is_reproducible_across_calls() {
     let a = Matrix::rand_seeded(6, 6, 123);
@@ -118,8 +116,6 @@ fn matrix_rand_seeded_is_reproducible_across_calls() {
 
 #[test]
 fn matrix_randn_then_used_in_matmul_does_not_panic() {
-    // Sanity check that random matrices compose with the rest of the
-    // public API exactly like any other matrix would.
     let a = Matrix::randn_seeded(4, 4, 99);
     let b = Matrix::eye(4);
     let product = &a * &b;
@@ -138,4 +134,43 @@ fn tensor_randn_seeded_is_reproducible_across_calls() {
     let a: numrs::Tensor<f64> = <numrs::Tensor<f64>>::randn_seeded(&[2, 2, 2], 8);
     let b: numrs::Tensor<f64> = <numrs::Tensor<f64>>::randn_seeded(&[2, 2, 2], 8);
     assert_eq!(a.as_slice(), b.as_slice());
+}
+
+// ── New: TensorError integration tests ───────────────────────────────────
+
+#[test]
+fn tensor_try_from_vec_propagates_through_question_mark() {
+    use numrs::{Tensor, TensorError};
+
+    fn build(shape: &[usize], data: Vec<f64>) -> Result<f64, TensorError> {
+        let t = Tensor::try_from_vec(shape, data)?;
+        Ok(t.as_slice().iter().sum())
+    }
+
+    assert!(build(&[2, 2], vec![1.0, 2.0, 3.0, 4.0]).is_ok());
+    match build(&[2, 2], vec![1.0, 2.0, 3.0]) {
+        Err(TensorError::InvalidConstruction { .. }) => {}
+        other => panic!("expected InvalidConstruction, got {:?}", other),
+    }
+}
+
+#[test]
+fn tensor_try_add_chains_with_try_get() {
+    use numrs::{Tensor, TensorError};
+
+    fn compute(a: &Tensor<f64>, b: &Tensor<f64>) -> Result<f64, TensorError> {
+        let sum = a.try_add(b)?;
+        let val = sum.try_get(&[0, 0])?;
+        Ok(*val)
+    }
+
+    let a = Tensor::from_vec(&[2, 2], vec![1.0, 2.0, 3.0, 4.0]);
+    let b = Tensor::from_vec(&[2, 2], vec![5.0, 6.0, 7.0, 8.0]);
+    assert_eq!(compute(&a, &b).unwrap(), 6.0);
+
+    let c = Tensor::from_vec(&[4], vec![1.0, 2.0, 3.0, 4.0]);
+    match compute(&a, &c) {
+        Err(TensorError::ShapeMismatch { .. }) => {}
+        other => panic!("expected ShapeMismatch, got {:?}", other),
+    }
 }

@@ -1,6 +1,6 @@
 use std::fmt;
 
-/// All errors that NumRS operations can produce.
+/// All errors that NumRS `Matrix` operations can produce.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MatrixError {
     /// Element-wise ops (add, sub, hadamard) require identical shapes.
@@ -82,3 +82,74 @@ impl fmt::Display for MatrixError {
 
 // Integrates with Rust's standard error ecosystem
 impl std::error::Error for MatrixError {}
+
+/// All errors that NumRS `Tensor<T>` operations can produce.
+///
+/// Kept deliberately separate from `MatrixError`: `Tensor` is N-dimensional
+/// and generic over `T`, so its failure modes (rank mismatch, N-D shape
+/// mismatch) don't map cleanly onto `Matrix`'s 2D-specific variants
+/// (`DimensionMismatch`, `NonSquare`, ...). Merging the two would force
+/// either dead fields on `Matrix`'s variants or `Vec<usize>` shapes on
+/// `Matrix`'s 2D-only ones — this keeps each error type honest about what
+/// its own type can actually produce.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TensorError {
+    /// Element-wise ops (add, sub, hadamard) require identical shapes.
+    ShapeMismatch {
+        expected: Vec<usize>,
+        found:    Vec<usize>,
+    },
+
+    /// An indexing operation supplied a different number of indices
+    /// than the tensor's rank (`shape.len()`).
+    RankMismatch {
+        expected_rank: usize,
+        found_rank:    usize,
+    },
+
+    /// `Tensor::from_vec()` received data whose length didn't match the
+    /// product of the requested shape.
+    InvalidConstruction {
+        shape:       Vec<usize>,
+        expected_len: usize,
+        found_len:   usize,
+    },
+
+    /// Index access was outside the tensor's bounds along some axis.
+    IndexOutOfBounds {
+        index: Vec<usize>,
+        shape: Vec<usize>,
+    },
+}
+
+impl fmt::Display for TensorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TensorError::ShapeMismatch { expected, found } => write!(
+                f,
+                "shape mismatch: expected {:?}, found {:?}",
+                expected, found
+            ),
+
+            TensorError::RankMismatch { expected_rank, found_rank } => write!(
+                f,
+                "rank mismatch: tensor has rank {} but index has rank {}",
+                expected_rank, found_rank
+            ),
+
+            TensorError::InvalidConstruction { shape, expected_len, found_len } => write!(
+                f,
+                "invalid construction: shape {:?} requires {} elements, got {}",
+                shape, expected_len, found_len
+            ),
+
+            TensorError::IndexOutOfBounds { index, shape } => write!(
+                f,
+                "index {:?} is out of bounds for tensor with shape {:?}",
+                index, shape
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TensorError {}
