@@ -167,3 +167,33 @@ fn main() {
     println!("Decrypted plaintext:\n{}", decrypted);
 }
 ```
+
+---
+
+## 7. Tensor Error Handling
+
+Using `?` to propagate `TensorError` in a function:
+
+```rust
+use numrs::{Tensor, TensorError};
+
+fn sum_elementwise(a: &Tensor<f64>, b: &Tensor<f64>) -> Result<f64, TensorError> {
+    let result = a.try_add(b)?;            // returns Err(ShapeMismatch) if shapes differ
+    let first  = result.try_get(&[0, 0])?; // returns Err(IndexOutOfBounds) if empty
+    Ok(result.as_slice().iter().sum::<f64>())
+}
+
+fn main() {
+    let a = Tensor::from_vec(&[2, 2], vec![1.0, 2.0, 3.0, 4.0]);
+    let b = Tensor::from_vec(&[2, 2], vec![5.0, 6.0, 7.0, 8.0]);
+    println!("{}", sum_elementwise(&a, &b).unwrap()); // 36.0
+
+    // Wrong shapes — propagates cleanly
+    let c = Tensor::from_vec(&[4], vec![1.0, 2.0, 3.0, 4.0]);
+    match sum_elementwise(&a, &c) {
+        Err(TensorError::ShapeMismatch { expected, found }) =>
+            println!("shape error: {:?} vs {:?}", expected, found),
+        _ => unreachable!(),
+    }
+}
+```

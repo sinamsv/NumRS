@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.1] — 2026-07-01
+
+### Added
+- `TensorError` enum in `src/error.rs` with four variants:
+  `ShapeMismatch`, `RankMismatch`, `InvalidConstruction`,
+  `IndexOutOfBounds` — parallel to `MatrixError` but N-dimensional
+- `TensorError` re-exported from `lib.rs` as `numrs::TensorError`
+- Fallible constructors and accessors on `Tensor<T>`:
+  `try_from_vec`, `try_get`, `try_get_mut`
+- Safe operation variants: `try_add`, `try_sub`, `try_hadamard`
+  (all return `Result<Tensor<T>, TensorError>`)
+
+### Design Notes
+- `TensorError` is intentionally separate from `MatrixError`:
+  N-dimensional shapes use `Vec<usize>` while Matrix uses `(usize, usize)`;
+  merging the two would require dead fields on one side or the other
+- Operators (`+`, `-`, `*`, `[]`) still panic ergonomically via
+  `try_*` + unwrap, identical to the `Matrix` pattern introduced in [0.6.1]
+- Panic messages use the `[NumRS] <operation> failed: <TensorError>` format
+
+---
+
 ## [0.8.0] — Tensors & Randomness
 
 ### Added
