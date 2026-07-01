@@ -69,11 +69,33 @@ let t: Tensor<f32> = Tensor::zeros(&[2, 3, 4]); // A 3D tensor
 let val = t[&[0, 1, 2]];                        // Stride-based indexing
 ```
 
-#### Supported Operations
-- **Basic Arithmetic**: `+`, `-` between tensors of the same shape.
-- **Scalar**: `tensor * scalar` (multiplies every element).
-- **Hadamard**: `a.hadamard(&b)` for element-wise multiplication.
-- **Random**: `.rand()`, `.randn()`, and seeded variants similar to `Matrix`.
+#### Constructors
+- `Tensor::from_vec(shape, data)` — panics with a clean message if
+  `data.len() != shape.iter().product()`
+- `Tensor::try_from_vec(shape, data)` → `Result<Tensor<T>, TensorError>`
+  — non-panicking alternative
+- `Tensor::zeros(shape)`, `Tensor::ones(shape)`, `Tensor::fill(shape, val)`
+- `Tensor::rand(shape)`, `Tensor::rand_seeded(shape, seed)`
+- `Tensor::<f32>::randn(shape)`, `Tensor::<f64>::randn_seeded(shape, seed)`
+
+#### Element Access
+- `tensor[&[i, j, k]]` — panics on rank or bounds mismatch
+- `tensor.try_get(&[i, j, k])` → `Result<&T, TensorError>`
+- `tensor.try_get_mut(&[i, j, k])` → `Result<&mut T, TensorError>`
+
+#### Arithmetic & Operators
+Operators (`+`, `-`, `*`) work on all four ownership combinations
+(`&T op &T`, `T op T`, etc.) and panic with a descriptive
+`TensorError` message on shape mismatch.
+
+For non-panicking alternatives use the `try_*` methods:
+- `a.try_add(&b)` → `Result<Tensor<T>, TensorError>`
+- `a.try_sub(&b)` → `Result<Tensor<T>, TensorError>`
+- `a.try_hadamard(&b)` → `Result<Tensor<T>, TensorError>`
+
+**Note:** Standard operator traits (`Add`, `Index`, etc.) cannot return
+`Result` in Rust, so operators always panic. Use `try_*` in contexts
+where you need to propagate errors with `?`.
 
 ### 3. `numrs::math` — Advanced Mathematics
 
@@ -91,6 +113,17 @@ NumRS uses the `MatrixError` enum to categorize failures:
 - `NonSquare`: Operation requires a square matrix (e.g., `det`, `inverse`).
 - `NonInvertible`: Matrix is singular.
 - `IndexOutOfBounds`: Accessing an element outside the matrix/tensor bounds.
+
+NumRS also exposes **`TensorError`** for `Tensor<T>` operations
+(re-exported as `numrs::TensorError`):
+- `ShapeMismatch` — element-wise ops on tensors with different shapes
+- `RankMismatch` — index has a different number of dimensions than the tensor
+- `InvalidConstruction` — `try_from_vec` data length ≠ shape product
+- `IndexOutOfBounds` — index out of range along some axis
+
+`TensorError` is kept separate from `MatrixError` because `Tensor` uses
+`Vec<usize>` shapes (N-dimensional) while `Matrix` uses `(usize, usize)`
+(always 2D); a shared type would require dead fields on one side.
 
 ### 5. `numrs::parallel` — Automatic Parallelism
 

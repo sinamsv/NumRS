@@ -47,7 +47,7 @@ fn main() {
 - [x] Determinant and Inverse
 - [x] Automatic parallelism via Rayon
 - [x] Comprehensive error handling
-- [/] **Tensor Support** (In Development)
+- [x] **Tensor Support** — N-D generic `Tensor<T>` with full error handling (`TensorError`, `try_*` methods)
 - [ ] Eigenvalues and eigenvectors
 - [ ] LU / QR decomposition
 - [ ] ML layer: ReLU, softmax, gradient tracking
